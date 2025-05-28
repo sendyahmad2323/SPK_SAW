@@ -12,16 +12,12 @@ class Criteria(models.Model):
     attribute = models.CharField(max_length=10, choices=ATTRIBUTE_CHOICES)
 
     def __str__(self):
-        return self.name
+        return f"{self.name} ({self.attribute}, Bobot: {self.weight})"
 
 
 class Framework(models.Model):
-    name = models.CharField(max_length=100)
-    performa = models.IntegerField()
-    skalabilitas = models.IntegerField()
-    komunitas = models.IntegerField()
-    kemudahan_belajar = models.IntegerField()
-    pemeliharaan = models.IntegerField()
+    name = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True, null=True)
 
     def __str__(self):
         return self.name
@@ -30,7 +26,7 @@ class Framework(models.Model):
 class FrameworkScore(models.Model):
     framework = models.ForeignKey(Framework, on_delete=models.CASCADE)
     criteria = models.ForeignKey(Criteria, on_delete=models.CASCADE)
-    value = models.FloatField(default=0)
+    value = models.FloatField(null=True, blank=True)
 
     class Meta:
         unique_together = ('framework', 'criteria')
@@ -38,10 +34,9 @@ class FrameworkScore(models.Model):
     def __str__(self):
         return f"{self.framework.name} - {self.criteria.name}: {self.value}"
 
-
 class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
     preferences = models.JSONField(default=dict)
 
     def __str__(self):
-        return self.user.username
+        return f"Profil: {self.user.username}"

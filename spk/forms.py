@@ -8,16 +8,15 @@ class RegisterForm(UserCreationForm):
         required=True,
         widget=forms.EmailInput(attrs={'class': 'form-control'})
     )
-    
+
     class Meta:
         model = User
         fields = ['username', 'email', 'password1', 'password2']
-        
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields['username'].widget.attrs.update({'class': 'form-control'})
-        self.fields['password1'].widget.attrs.update({'class': 'form-control'})
-        self.fields['password2'].widget.attrs.update({'class': 'form-control'})
+        for field_name in self.fields:
+            self.fields[field_name].widget.attrs.update({'class': 'form-control'})
 
 class CriteriaForm(forms.ModelForm):
     class Meta:
@@ -39,14 +38,14 @@ class CriteriaForm(forms.ModelForm):
                 'class': 'form-select'
             }),
         }
-        
+
     def clean_weight(self):
         weight = self.cleaned_data.get('weight')
-        if weight is not None:
-            if weight <= 0 or weight > 1:
-                raise forms.ValidationError('Bobot harus antara 0.01 sampai 1.0')
+        if weight is not None and (weight <= 0 or weight > 1):
+            raise forms.ValidationError('Bobot harus antara 0.01 sampai 1.0')
         return weight
 
+        
 class FrameworkForm(forms.ModelForm):
     class Meta:
         model = Framework
@@ -62,6 +61,14 @@ class FrameworkForm(forms.ModelForm):
                 'placeholder': 'Deskripsi singkat tentang framework ini...'
             }),
         }
+        
+
+    def clean(self):
+        cleaned_data = super().clean()
+        for field in ['performa', 'skalabilitas', 'komunitas', 'kemudahan_belajar', 'pemeliharaan']:
+            value = cleaned_data.get(field)
+            if value is not None and (value < 1 or value > 10):
+                self.add_error(field, 'Nilai harus antara 1 dan 10')
 
 class FrameworkScoreForm(forms.ModelForm):
     class Meta:
@@ -77,6 +84,7 @@ class FrameworkScoreForm(forms.ModelForm):
             }),
         }
 
+
 class CSVUploadForm(forms.Form):
     csv_file = forms.FileField(
         label='Pilih file CSV',
@@ -86,12 +94,12 @@ class CSVUploadForm(forms.Form):
         }),
         help_text='Format file: criteria.csv, frameworks.csv, atau scores.csv'
     )
-    
+
     def clean_csv_file(self):
         file = self.cleaned_data.get('csv_file')
         if file:
             if not file.name.endswith('.csv'):
                 raise forms.ValidationError('File harus berformat CSV (.csv)')
-            if file.size > 5*1024*1024:  # 5MB limit
+            if file.size > 5 * 1024 * 1024:
                 raise forms.ValidationError('Ukuran file maksimal 5MB')
         return file

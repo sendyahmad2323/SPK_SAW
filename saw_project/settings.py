@@ -78,7 +78,7 @@ WSGI_APPLICATION = 'saw_project.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'spk_saw',
+        'NAME': 'saw_spk',
         'USER': 'root',
         'PASSWORD': '',
         'HOST': 'localhost',

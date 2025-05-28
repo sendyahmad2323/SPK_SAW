@@ -92,26 +92,41 @@ def delete_criteria(request, criteria_id):
 # Framework Management
 @login_required
 def add_framework(request):
+    criteria_list = Criteria.objects.all()
+
     if request.method == 'POST':
         form = FrameworkForm(request.POST)
         if form.is_valid():
             framework = form.save()
-            for criteria in Criteria.objects.all():
-                FrameworkScore.objects.get_or_create(
-                    framework=framework,
-                    criteria=criteria,
-                    defaults={'value': None}  # Ubah dari 0 ke None
-                )
+
+            for criteria in criteria_list:
+                raw_val = request.POST.get(f'score_{criteria.id}', '').strip()
+                # Hanya parse kalau ada input
+                if raw_val:
+                    try:
+                        score_val = float(raw_val)
+                    except ValueError:
+                        score_val = 0.0  # atau kamu bisa continue untuk skip invalid
+                    FrameworkScore.objects.create(
+                        framework=framework,
+                        criteria=criteria,
+                        value=score_val
+                    )
+                # kalau raw_val kosong → skip (tidak membuat record)
+
             messages.success(request, f'Framework "{framework.name}" berhasil ditambahkan.')
             return redirect('framework_list')
         else:
-            messages.error(request, "Form tidak valid, tolong cek kembali.")
+            messages.error(request, "Form tidak valid.")
     else:
         form = FrameworkForm()
-    
+
     return render(request, 'framework_form.html', {
-        'form': form
+        'form': form,
+        'criteria_list': criteria_list,
     })
+
+
 
 @login_required
 def edit_framework_scores(request, framework_id):
@@ -271,7 +286,7 @@ def calculate_saw(request):
     
     return render(request, 'result.html', context)
 
-# CSV Upload - DIPERBAIKI
+
 @login_required
 def upload_csv(request):
     if request.method == 'POST':
@@ -280,122 +295,180 @@ def upload_csv(request):
             csv_file = request.FILES['csv_file']
             
             try:
-                # Baca file CSV
+                # Read & decode
                 file_data = csv_file.read().decode('utf-8')
                 io_string = io.StringIO(file_data)
                 reader = csv.DictReader(io_string)
                 
+                # --- normalize headers: strip spaces off each fieldname ---
+                if reader.fieldnames:
+                    reader.fieldnames = [h.strip() for h in reader.fieldnames]
+                
                 filename = csv_file.name.lower()
                 
+                # 1) Upload criteria
                 if 'criteria' in filename:
-                    # Upload kriteria
+                    expected = ['name', 'weight', 'attribute']
+                    missing = [c for c in expected if c not in reader.fieldnames]
+                    if missing:
+                        messages.error(request, f'Kolom criteria hilang: {", ".join(missing)}')
+                        return redirect('framework_list')
+
                     success_count = 0
-                    for row in reader:
+                    for idx, row in enumerate(reader, start=1):
                         try:
                             Criteria.objects.update_or_create(
                                 name=row['name'].strip(),
                                 defaults={
                                     'weight': float(row['weight']),
-                                    'attribute': row['attribute'].lower().strip()
+                                    'attribute': row['attribute'].strip().lower()
                                 }
                             )
                             success_count += 1
                         except Exception as e:
-                            messages.warning(request, f'Error pada baris {row}: {str(e)}')
-                    
+                            messages.warning(request,
+                                             f'Error di baris {idx} (criteria): {e}'
+                                             )
                     messages.success(request, f'{success_count} kriteria berhasil diupload.')
                 
-                elif 'framework' in filename or 'data' in filename:
-                    # Upload framework dan scores dari data utama
-                    success_count = 0
-                    score_count = 0
+                # 2) Upload framework & scores (data)
+                file_data = csv_file.read().decode('utf-8')
+                io_string = io.StringIO(file_data)
+                reader = csv.DictReader(io_string, delimiter='\t')  # <-- penting, sesuaikan delimiter
+                if reader.fieldnames:
+                    reader.fieldnames = [h.strip().lower() for h in reader.fieldnames]
                     
-                    # Mapping kolom CSV ke nama kriteria
+                elif 'framework' in filename or 'data' in filename:
+                    expected = [
+                        'Framework',
+                        'Performa (req/s)',
+                        'Skalabilitas (1-5)',
+                        'Komunitas (User)',
+                        'Kemudahan Belajar (Jam)',
+                        'Pemeliharaan & Update (per Tahun)'
+                    ]
+                    missing = [c for c in expected if c not in reader.fieldnames]
+                    if missing:
+                        messages.error(request,
+                                       f'Kolom data hilang: {", ".join(missing)}'
+                                       )
+                        return redirect('framework_list')
+
+                    row_count = 0
+                    score_count = 0
+
                     column_mapping = {
                         'Performa (req/s)': 'Performa',
-                        'Skalabilitas (1-5)': 'Skalabilitas', 
+                        'Skalabilitas (1-5)': 'Skalabilitas',
                         'Komunitas (User)': 'Komunitas',
                         'Kemudahan Belajar (Jam)': 'Kemudahan Belajar',
-                        'Pemeliharaan & Update (per Tahun)': 'Pemeliharaan & Update'
+                        'Pemeliharaan & Update (per Tahun)': 'Pemeliharaan & Update',
                     }
-                    
+
                     for row in reader:
-                        try:
-                            # Skip baris kosong atau header yang tidak valid
-                            if not row.get('Framework') or row.get('Framework').strip() == '':
+                        name = row.get('Framework', '').strip()
+                        if not name:
+                            continue
+                        row_count += 1
+
+                        framework, created = Framework.objects.get_or_create(
+                            name=name,
+                            defaults={'description': f'Framework {name}'}
+                        )
+
+                        for csv_col, crit_name in column_mapping.items():
+                            raw = row.get(csv_col, '').strip()
+                            if not raw:
                                 continue
-                                
-                            framework_name = row['Framework'].strip()
-                            
-                            # Buat atau update framework
-                            framework, created = Framework.objects.get_or_create(
-                                name=framework_name,
-                                defaults={'description': f'Framework {framework_name}'}
-                            )
-                            
-                            if created:
-                                success_count += 1
-                            
-                            # Update scores berdasarkan mapping
-                            for csv_column, criteria_name in column_mapping.items():
-                                if csv_column in row and row[csv_column]:
-                                    try:
-                                        value = float(row[csv_column])
-                                        
-                                        # Cari criteria
-                                        criteria = Criteria.objects.filter(name=criteria_name).first()
-                                        if criteria:
-                                            FrameworkScore.objects.update_or_create(
-                                                framework=framework,
-                                                criteria=criteria,
-                                                defaults={'value': value}
-                                            )
-                                            score_count += 1
-                                    except (ValueError, TypeError):
-                                        continue
-                                        
-                        except Exception as e:
-                            messages.warning(request, f'Error pada framework {row.get("Framework", "unknown")}: {str(e)}')
-                    
-                    messages.success(request, f'{success_count} framework berhasil diupload.')
-                    if score_count > 0:
-                        messages.success(request, f'{score_count} score berhasil diupload.')
-                
-                elif 'score' in filename:
-                    # Upload scores format khusus
-                    success_count = 0
-                    for row in reader:
-                        try:
-                            framework = Framework.objects.get(name=row['framework'].strip())
-                            criteria = Criteria.objects.get(name=row['criteria'].strip())
-                            
+                            try:
+                                val = float(raw)
+                            except ValueError:
+                                messages.warning(
+                                    request,
+                                    f'Nilai tidak valid di kolom "{csv_col}", baris {row_count}: "{raw}"'
+                                )
+                                continue
+
+                            crit = Criteria.objects.filter(name=crit_name).first()
+                            if not crit:
+                                messages.warning(
+                                    request,
+                                    f'Criteria "{crit_name}" tidak ditemukan (baris {row_count}).'
+                                )
+                                continue
+
                             FrameworkScore.objects.update_or_create(
                                 framework=framework,
-                                criteria=criteria,
-                                defaults={'value': float(row['value'])}
+                                criteria=crit,
+                                defaults={'value': val}
+                            )
+                            score_count += 1
+
+                    messages.success(
+                        request,
+                        f'{row_count} baris framework diproses (baru maupun update).'
+                    )
+                    if score_count:
+                        messages.success(
+                            request,
+                            f'{score_count} skor berhasil diupload.'
+                        )
+                    else:
+                        messages.info(
+                            request,
+                            'Tidak ada skor yang diupload.'
+                        )
+
+                # 3) Upload khusus score saja
+                elif 'score' in filename:
+                    expected = ['framework', 'criteria', 'value']
+                    missing = [c for c in expected if c not in reader.fieldnames]
+                    if missing:
+                        messages.error(request,
+                                       f'Kolom score hilang: {", ".join(missing)}'
+                                       )
+                        return redirect('framework_list')
+
+                    success_count = 0
+                    for idx, row in enumerate(reader, start=1):
+                        try:
+                            fw = Framework.objects.get(name=row['framework'].strip())
+                            crit = Criteria.objects.get(name=row['criteria'].strip())
+                            val = float(row['value'])
+                            FrameworkScore.objects.update_or_create(
+                                framework=fw,
+                                criteria=crit,
+                                defaults={'value': val}
                             )
                             success_count += 1
                         except Framework.DoesNotExist:
-                            messages.warning(request, f'Framework "{row["framework"]}" tidak ditemukan.')
+                            messages.warning(request,
+                                             f'Framework "{row.get("framework")}" tidak ditemukan (baris {idx}).'
+                                             )
                         except Criteria.DoesNotExist:
-                            messages.warning(request, f'Criteria "{row["criteria"]}" tidak ditemukan.')
+                            messages.warning(request,
+                                             f'Criteria "{row.get("criteria")}" tidak ditemukan (baris {idx}).'
+                                             )
                         except Exception as e:
-                            messages.warning(request, f'Error pada baris {row}: {str(e)}')
-                    
+                            messages.warning(request,
+                                             f'Error di baris {idx} (score): {e}'
+                                             )
                     messages.success(request, f'{success_count} score berhasil diupload.')
-                
+
                 else:
-                    messages.error(request, 'Nama file harus mengandung kata "criteria", "framework", "data", atau "score".')
-                
+                    messages.error(
+                        request,
+                        'Nama file harus mengandung "criteria", "framework", "data", atau "score".'
+                    )
+
                 return redirect('framework_list')
-                
+
             except Exception as e:
-                messages.error(request, f'Error membaca file CSV: {str(e)}')
-    
+                messages.error(request, f'Error membaca file CSV: {e}')
+                return redirect('framework_list')
     else:
         form = CSVUploadForm()
-    
-    # Template upload guide
+
     upload_guide = {
         'criteria': {
             'filename': 'criteria.csv',
@@ -404,11 +477,18 @@ def upload_csv(request):
         },
         'framework': {
             'filename': 'data.csv atau framework_data.csv',
-            'columns': ['Framework', 'Performa (req/s)', 'Skalabilitas (1-5)', 'Komunitas (User)', 'Kemudahan Belajar (Jam)', 'Pemeliharaan & Update (per Tahun)'],
+            'columns': [
+                'Framework',
+                'Performa (req/s)',
+                'Skalabilitas (1-5)',
+                'Komunitas (User)',
+                'Kemudahan Belajar (Jam)',
+                'Pemeliharaan & Update (per Tahun)'
+            ],
             'example': 'React,8500,4,500000,40,12'
         }
     }
-    
+
     return render(request, 'upload_csv.html', {
         'form': form,
         'upload_guide': upload_guide

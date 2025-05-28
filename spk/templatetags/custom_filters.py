@@ -34,3 +34,7 @@ def percentage(value):
         return f"{float(value) * 100:.1f}%"
     except (ValueError, TypeError):
         return "0%"
+
+@register.filter
+def get_item(dictionary, key):
+    return dictionary.get(key)
