@@ -30,9 +30,8 @@ Aplikasi ini dirancang oleh **Sendy Ahmad**, mahasiswa dari **Universitas Muhamm
 - MySQL (database)
 - Bootstrap (UI)
 
-## 🚀 Cara Menjalankan Proyek
+## 🚀 Tampilan Web
+![image](https://github.com/user-attachments/assets/b92d83e0-feca-4351-a2a3-28bab3ce6888)
+![image](https://github.com/user-attachments/assets/2ac09a96-c73c-4afa-9cca-cc85acc9361e)
 
-1. Clone repositori:
-   ```bash
-   git clone https://github.com/username/spk-framework-saw.git
-   cd spk-framework-saw
+
