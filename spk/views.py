@@ -1,0 +1,494 @@
+from django.shortcuts import render, redirect, get_object_or_404
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth import login, logout
+from django.contrib import messages
+from django.http import JsonResponse
+import csv
+import io
+from .forms import RegisterForm, CriteriaForm, CSVUploadForm, FrameworkForm
+from .models import Criteria, Framework, FrameworkScore, UserProfile
+from django.core.management.base import BaseCommand
+
+# Registration and Authentication
+def register(request):
+    if request.method == 'POST':
+        form = RegisterForm(request.POST)
+        if form.is_valid():
+            user = form.save()
+            UserProfile.objects.get_or_create(user=user)
+            login(request, user)
+            messages.success(request, 'Registrasi berhasil! Selamat datang.')
+            return redirect('dashboard')
+        else:
+            messages.error(request, 'Terjadi kesalahan pada form registrasi.')
+    else:
+        form = RegisterForm()
+    return render(request, 'registration/register.html', {'form': form})
+
+@login_required
+def logout_view(request):
+    logout(request)
+    messages.info(request, 'Anda telah logout.')
+    return redirect('login')
+
+# Dashboard
+@login_required
+def dashboard(request):
+    # Statistik dasar
+    total_frameworks = Framework.objects.count()
+    total_criteria = Criteria.objects.count()
+    total_weight = sum(c.weight for c in Criteria.objects.all())
+    
+    context = {
+        'total_frameworks': total_frameworks,
+        'total_criteria': total_criteria,
+        'total_weight': total_weight,
+        'is_ready_to_calculate': abs(total_weight - 1.0) < 0.001 and total_frameworks > 0
+    }
+    return render(request, 'dashboard.html', context)
+
+# Criteria Management
+@login_required
+def add_criteria(request):
+    if request.method == 'POST':
+        form = CriteriaForm(request.POST)
+        if form.is_valid():
+            form.save()
+            messages.success(request, f'Kriteria "{form.cleaned_data["name"]}" berhasil ditambahkan.')
+            return redirect('framework_list')
+        else:
+            messages.error(request, 'Terjadi kesalahan saat menambah kriteria.')
+    else:
+        form = CriteriaForm()
+    return render(request, 'criteria_form.html', {'form': form})
+
+@login_required
+def criteria_list(request):
+    criteria = Criteria.objects.all()
+    return render(request, 'criteria_list.html', {'criteria_list': criteria})
+
+@login_required
+def edit_criteria(request, criteria_id):
+    criteria = get_object_or_404(Criteria, id=criteria_id)
+    if request.method == 'POST':
+        form = CriteriaForm(request.POST, instance=criteria)
+        if form.is_valid():
+            form.save()
+            messages.success(request, f'Kriteria "{criteria.name}" berhasil diperbarui.')
+            return redirect('framework_list')
+    else:
+        form = CriteriaForm(instance=criteria)
+    return render(request, 'criteria_form.html', {'form': form, 'edit_mode': True})
+
+@login_required
+def delete_criteria(request, criteria_id):
+    criteria = get_object_or_404(Criteria, id=criteria_id)
+    if request.method == 'POST':
+        criteria_name = criteria.name
+        criteria.delete()
+        messages.success(request, f'Kriteria "{criteria_name}" berhasil dihapus.')
+    return redirect('framework_list')
+
+# Framework Management
+@login_required
+def add_framework(request):
+    if request.method == 'POST':
+        form = FrameworkForm(request.POST)
+        if form.is_valid():
+            framework = form.save()
+            # Buat score default untuk semua kriteria
+            for criteria in Criteria.objects.all():
+                FrameworkScore.objects.get_or_create(
+                    framework=framework,
+                    criteria=criteria,
+                    defaults={'value': 0}
+                )
+            messages.success(request, f'Framework "{framework.name}" berhasil ditambahkan.')
+            return redirect('framework_list')
+    else:
+        form = FrameworkForm()
+    return render(request, 'framework_form.html', {'form': form})
+
+@login_required
+def edit_framework_scores(request, framework_id):
+    framework = get_object_or_404(Framework, id=framework_id)
+    criteria_list = Criteria.objects.all()
+    
+    if request.method == 'POST':
+        for criteria in criteria_list:
+            score_value = request.POST.get(f'score_{criteria.id}')
+            if score_value:
+                try:
+                    score_value = float(score_value)
+                    FrameworkScore.objects.update_or_create(
+                        framework=framework,
+                        criteria=criteria,
+                        defaults={'value': score_value}
+                    )
+                except ValueError:
+                    messages.error(request, f'Nilai tidak valid untuk kriteria {criteria.name}')
+                    # lanjut ke criteria berikutnya jika error
+                
+        messages.success(request, f'Score untuk framework "{framework.name}" berhasil diperbarui.')
+        return redirect('framework_list')
+    
+    # Ambil scores yang sudah ada untuk menampilkan di form (default 0 jika belum ada)
+    scores = {
+        criteria.id: FrameworkScore.objects.filter(framework=framework, criteria=criteria).first().value
+        if FrameworkScore.objects.filter(framework=framework, criteria=criteria).exists() else 0
+        for criteria in criteria_list
+    }
+    
+    context = {
+        'framework': framework,
+        'criteria_list': criteria_list,
+        'scores': scores,
+    }
+    return render(request, 'edit_frameworks_scores.html', context)
+# Framework List
+@login_required
+def framework_list(request):
+    criteria_list = Criteria.objects.all()
+    frameworks = Framework.objects.all()
+    total_weight = sum(c.weight for c in criteria_list)
+    
+    # Siapkan data untuk tabel dengan scores
+    framework_data = []
+    for fw in frameworks:
+        fw_scores = {}
+        for criteria in criteria_list:
+            score = FrameworkScore.objects.filter(framework=fw, criteria=criteria).first()
+            fw_scores[criteria.id] = score.value if score else 0
+        
+        framework_data.append({
+            'framework': fw,
+            'scores': fw_scores
+        })
+    
+    return render(request, 'framework_list.html', {
+        'framework_data': framework_data,
+        'criteria_list': criteria_list,
+        'total_weight': total_weight,
+        'is_ready': len(frameworks) > 0
+    })
+
+# SAW Calculation
+@login_required
+def calculate_saw(request):
+    criteria_list = list(Criteria.objects.all())
+    frameworks = list(Framework.objects.all())
+    
+    if not criteria_list or not frameworks:
+        messages.error(request, 'Data kriteria atau framework masih kosong.')
+        return redirect('framework_list')
+    
+    # Validasi total bobot
+    total_weight = sum(c.weight for c in criteria_list)
+    if abs(total_weight - 1.0) > 0.001:
+        messages.error(request, f'Total bobot kriteria harus 1.0 (saat ini: {total_weight:.3f})')
+        return redirect('framework_list')
+    
+    # 1. Buat decision matrix
+    decision_matrix = {}
+    for fw in frameworks:
+        decision_matrix[fw.name] = {}
+        for criteria in criteria_list:
+            score = FrameworkScore.objects.filter(framework=fw, criteria=criteria).first()
+            decision_matrix[fw.name][criteria.name] = score.value if score else 0
+    
+    # 2. Normalisasi
+    normalized_matrix = {}
+    max_values = {}
+    min_values = {}
+    
+    # Cari nilai max dan min untuk setiap kriteria
+    for criteria in criteria_list:
+        values = [decision_matrix[fw.name][criteria.name] for fw in frameworks]
+        max_values[criteria.name] = max(values) if values else 1
+        min_values[criteria.name] = min(values) if values else 0
+    
+    # Normalisasi berdasarkan tipe atribut
+    for fw in frameworks:
+        normalized_matrix[fw.name] = {}
+        for criteria in criteria_list:
+            original_value = decision_matrix[fw.name][criteria.name]
+            
+            if criteria.attribute == 'benefit':
+                # Untuk benefit: nilai tertinggi terbaik
+                if max_values[criteria.name] > 0:
+                    normalized_value = original_value / max_values[criteria.name]
+                else:
+                    normalized_value = 0
+            else:
+                # Untuk cost: nilai terendah terbaik
+                if original_value > 0:
+                    normalized_value = min_values[criteria.name] / original_value
+                else:
+                    normalized_value = 1  # Jika nilai 0, berikan nilai terbaik
+            
+            normalized_matrix[fw.name][criteria.name] = normalized_value
+    
+    # 3. Hitung nilai akhir (weighted sum)
+    final_scores = []
+    for fw in frameworks:
+        total_score = 0
+        weighted_scores = {}
+        
+        for criteria in criteria_list:
+            normalized_val = normalized_matrix[fw.name][criteria.name]
+            weighted_val = normalized_val * criteria.weight
+            weighted_scores[criteria.name] = weighted_val
+            total_score += weighted_val
+        
+        final_scores.append({
+            'framework': fw.name,
+            'score': round(total_score, 4),
+            'weighted_scores': weighted_scores
+        })
+    
+    # Urutkan berdasarkan score tertinggi
+    final_scores.sort(key=lambda x: x['score'], reverse=True)
+    best_framework = final_scores[0] if final_scores else None
+    
+    context = {
+        'decision_matrix': decision_matrix,
+        'normalized_matrix': normalized_matrix,
+        'final_scores': final_scores,
+        'best_framework': best_framework,
+        'criteria_list': criteria_list,
+        'frameworks': frameworks
+    }
+    
+    return render(request, 'result.html', context)
+
+# CSV Upload - DIPERBAIKI
+@login_required
+def upload_csv(request):
+    if request.method == 'POST':
+        form = CSVUploadForm(request.POST, request.FILES)
+        if form.is_valid():
+            csv_file = request.FILES['csv_file']
+            
+            try:
+                # Baca file CSV
+                file_data = csv_file.read().decode('utf-8')
+                io_string = io.StringIO(file_data)
+                reader = csv.DictReader(io_string)
+                
+                filename = csv_file.name.lower()
+                
+                if 'criteria' in filename:
+                    # Upload kriteria
+                    success_count = 0
+                    for row in reader:
+                        try:
+                            Criteria.objects.update_or_create(
+                                name=row['name'].strip(),
+                                defaults={
+                                    'weight': float(row['weight']),
+                                    'attribute': row['attribute'].lower().strip()
+                                }
+                            )
+                            success_count += 1
+                        except Exception as e:
+                            messages.warning(request, f'Error pada baris {row}: {str(e)}')
+                    
+                    messages.success(request, f'{success_count} kriteria berhasil diupload.')
+                
+                elif 'framework' in filename or 'data' in filename:
+                    # Upload framework dan scores dari data utama
+                    success_count = 0
+                    score_count = 0
+                    
+                    # Mapping kolom CSV ke nama kriteria
+                    column_mapping = {
+                        'Performa (req/s)': 'Performa',
+                        'Skalabilitas (1-5)': 'Skalabilitas', 
+                        'Komunitas (User)': 'Komunitas',
+                        'Kemudahan Belajar (Jam)': 'Kemudahan Belajar',
+                        'Pemeliharaan & Update (per Tahun)': 'Pemeliharaan & Update'
+                    }
+                    
+                    for row in reader:
+                        try:
+                            # Skip baris kosong atau header yang tidak valid
+                            if not row.get('Framework') or row.get('Framework').strip() == '':
+                                continue
+                                
+                            framework_name = row['Framework'].strip()
+                            
+                            # Buat atau update framework
+                            framework, created = Framework.objects.get_or_create(
+                                name=framework_name,
+                                defaults={'description': f'Framework {framework_name}'}
+                            )
+                            
+                            if created:
+                                success_count += 1
+                            
+                            # Update scores berdasarkan mapping
+                            for csv_column, criteria_name in column_mapping.items():
+                                if csv_column in row and row[csv_column]:
+                                    try:
+                                        value = float(row[csv_column])
+                                        
+                                        # Cari criteria
+                                        criteria = Criteria.objects.filter(name=criteria_name).first()
+                                        if criteria:
+                                            FrameworkScore.objects.update_or_create(
+                                                framework=framework,
+                                                criteria=criteria,
+                                                defaults={'value': value}
+                                            )
+                                            score_count += 1
+                                    except (ValueError, TypeError):
+                                        continue
+                                        
+                        except Exception as e:
+                            messages.warning(request, f'Error pada framework {row.get("Framework", "unknown")}: {str(e)}')
+                    
+                    messages.success(request, f'{success_count} framework berhasil diupload.')
+                    if score_count > 0:
+                        messages.success(request, f'{score_count} score berhasil diupload.')
+                
+                elif 'score' in filename:
+                    # Upload scores format khusus
+                    success_count = 0
+                    for row in reader:
+                        try:
+                            framework = Framework.objects.get(name=row['framework'].strip())
+                            criteria = Criteria.objects.get(name=row['criteria'].strip())
+                            
+                            FrameworkScore.objects.update_or_create(
+                                framework=framework,
+                                criteria=criteria,
+                                defaults={'value': float(row['value'])}
+                            )
+                            success_count += 1
+                        except Framework.DoesNotExist:
+                            messages.warning(request, f'Framework "{row["framework"]}" tidak ditemukan.')
+                        except Criteria.DoesNotExist:
+                            messages.warning(request, f'Criteria "{row["criteria"]}" tidak ditemukan.')
+                        except Exception as e:
+                            messages.warning(request, f'Error pada baris {row}: {str(e)}')
+                    
+                    messages.success(request, f'{success_count} score berhasil diupload.')
+                
+                else:
+                    messages.error(request, 'Nama file harus mengandung kata "criteria", "framework", "data", atau "score".')
+                
+                return redirect('framework_list')
+                
+            except Exception as e:
+                messages.error(request, f'Error membaca file CSV: {str(e)}')
+    
+    else:
+        form = CSVUploadForm()
+    
+    # Template upload guide
+    upload_guide = {
+        'criteria': {
+            'filename': 'criteria.csv',
+            'columns': ['name', 'weight', 'attribute'],
+            'example': 'Performa,0.25,benefit'
+        },
+        'framework': {
+            'filename': 'data.csv atau framework_data.csv',
+            'columns': ['Framework', 'Performa (req/s)', 'Skalabilitas (1-5)', 'Komunitas (User)', 'Kemudahan Belajar (Jam)', 'Pemeliharaan & Update (per Tahun)'],
+            'example': 'React,8500,4,500000,40,12'
+        }
+    }
+    
+    return render(request, 'upload_csv.html', {
+        'form': form,
+        'upload_guide': upload_guide
+    })
+
+# Management Command untuk import data
+class Command(BaseCommand):  
+    help = "Import criteria & framework data from CSV"
+
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '--criteria-csv', required=True,
+            help="Path to criteria.csv (name,weight,attribute)"
+        )
+        parser.add_argument(
+            '--data-csv', required=True,
+            help="Path to data.csv with framework metrics"
+        )
+
+    def handle(self, *args, **options):
+        criteria_csv = options['criteria_csv']
+        data_csv = options['data_csv']
+
+        # 1. Reset & load kriteria
+        self.stdout.write("🔄 Resetting Criteria...")
+        Criteria.objects.all().delete()
+        
+        with open(criteria_csv, newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                Criteria.objects.create(
+                    name=row['name'].strip(),
+                    weight=float(row['weight']),
+                    attribute=row['attribute'].strip().lower()
+                )
+        
+        all_criteria = list(Criteria.objects.all())
+        self.stdout.write(f"✔️ Loaded {len(all_criteria)} criteria.")
+
+        # 2. Load data.csv dan mapping kolom ke nama kriteria
+        mapping = {
+            'Performa (req/s)': 'Performa',
+            'Skalabilitas (1-5)': 'Skalabilitas',
+            'Komunitas (User)': 'Komunitas',
+            'Kemudahan Belajar (Jam)': 'Kemudahan Belajar',
+            'Pemeliharaan & Update (per Tahun)': 'Pemeliharaan & Update',
+        }
+
+        self.stdout.write("🔄 Processing data.csv for frameworks & scores...")
+        created_fw = 0
+        updated_scores = 0
+        
+        with open(data_csv, newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f, delimiter=',')
+            for row in reader:
+                # Skip empty rows
+                if not row.get('Framework') or row.get('Framework').strip() == '':
+                    continue
+                    
+                fw_name = row['Framework'].strip()
+                
+                # 3. Create or get Framework
+                fw, created = Framework.objects.get_or_create(
+                    name=fw_name,
+                    defaults={'description': f'Framework {fw_name}'}
+                )
+                if created:
+                    created_fw += 1
+
+                # 4. For each mapped kriteria, update or create score
+                for col, crit_name in mapping.items():
+                    raw_val = row.get(col)
+                    if raw_val is None or raw_val == '':
+                        continue
+                    try:
+                        value = float(raw_val)
+                    except ValueError:
+                        continue
+
+                    crit = next((c for c in all_criteria if c.name == crit_name), None)
+                    if not crit:
+                        self.stderr.write(f"⚠️ Criteria '{crit_name}' not found, skipping.")
+                        continue
+
+                    fs, _ = FrameworkScore.objects.update_or_create(
+                        framework=fw,
+                        criteria=crit,
+                        defaults={'value': value}
+                    )
+                    updated_scores += 1
+
+        self.stdout.write(f"✔️ Created {created_fw} new frameworks.")
+        self.stdout.write(f"✔️ Updated/Created {updated_scores} framework scores.")
