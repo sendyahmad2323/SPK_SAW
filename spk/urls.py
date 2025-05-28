@@ -19,6 +19,11 @@ urlpatterns = [
     path('frameworks/', views.framework_list, name='framework_list'),
     path('add-framework/', views.add_framework, name='add_framework'),
     path('edit-scores/<int:framework_id>/', views.edit_framework_scores, name='edit_framework_scores'),
+    path('frameworks/<int:framework_id>/delete/', views.delete_framework, name='delete_framework'),
+    
+    #update
+    path('export/', views.export_data, name='export_data'),
+    path('reset/', views.reset_data, name='reset_data'),
     
     # SAW Calculation
     path('calculate/', views.calculate_saw, name='calculate_saw'),

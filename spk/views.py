@@ -2,7 +2,7 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth import login, logout
 from django.contrib import messages
-from django.http import JsonResponse
+from django.http import HttpResponse
 import csv
 import io
 from .forms import RegisterForm, CriteriaForm, CSVUploadForm, FrameworkForm
@@ -96,55 +96,65 @@ def add_framework(request):
         form = FrameworkForm(request.POST)
         if form.is_valid():
             framework = form.save()
-            # Buat score default untuk semua kriteria
             for criteria in Criteria.objects.all():
                 FrameworkScore.objects.get_or_create(
                     framework=framework,
                     criteria=criteria,
-                    defaults={'value': 0}
+                    defaults={'value': None}  # Ubah dari 0 ke None
                 )
             messages.success(request, f'Framework "{framework.name}" berhasil ditambahkan.')
             return redirect('framework_list')
+        else:
+            messages.error(request, "Form tidak valid, tolong cek kembali.")
     else:
         form = FrameworkForm()
-    return render(request, 'framework_form.html', {'form': form})
+    
+    return render(request, 'framework_form.html', {
+        'form': form
+    })
 
 @login_required
 def edit_framework_scores(request, framework_id):
     framework = get_object_or_404(Framework, id=framework_id)
     criteria_list = Criteria.objects.all()
-    
+
+    # Ambil nilai existing jadi dict {criteria.id: value}
+    existing = FrameworkScore.objects.filter(framework=framework)
+    scores = {s.criteria.id: s.value for s in existing}
+
     if request.method == 'POST':
         for criteria in criteria_list:
-            score_value = request.POST.get(f'score_{criteria.id}')
-            if score_value:
+            key = f'score_{criteria.id}'
+            if key in request.POST:
+                raw = request.POST[key]
                 try:
-                    score_value = float(score_value)
                     FrameworkScore.objects.update_or_create(
                         framework=framework,
                         criteria=criteria,
-                        defaults={'value': score_value}
+                        defaults={'value': float(raw)}
                     )
                 except ValueError:
                     messages.error(request, f'Nilai tidak valid untuk kriteria {criteria.name}')
-                    # lanjut ke criteria berikutnya jika error
-                
-        messages.success(request, f'Score untuk framework "{framework.name}" berhasil diperbarui.')
+        messages.success(request, f'Skor untuk "{framework.name}" berhasil diperbarui.')
         return redirect('framework_list')
-    
-    # Ambil scores yang sudah ada untuk menampilkan di form (default 0 jika belum ada)
-    scores = {
-        criteria.id: FrameworkScore.objects.filter(framework=framework, criteria=criteria).first().value
-        if FrameworkScore.objects.filter(framework=framework, criteria=criteria).exists() else 0
-        for criteria in criteria_list
-    }
-    
-    context = {
+
+    return render(request, 'edit_frameworks_scores.html', {
         'framework': framework,
         'criteria_list': criteria_list,
-        'scores': scores,
-    }
-    return render(request, 'edit_frameworks_scores.html', context)
+        'scores': scores,  # di template: value="{{ scores|lookup:criteria.id }}"
+    })
+    
+@login_required
+def delete_framework(request, framework_id):
+    framework = get_object_or_404(Framework, id=framework_id)
+    if request.method == 'POST':
+        framework.delete()
+        messages.success(request, f'Framework "{framework.name}" berhasil dihapus.')
+        return redirect('framework_list')
+    # Kalau mau tampilkan konfirmasi sebelum delete:
+    return render(request, 'framework_delete.html', {
+        'framework': framework
+    })
 # Framework List
 @login_required
 def framework_list(request):
@@ -492,3 +502,31 @@ class Command(BaseCommand):
 
         self.stdout.write(f"✔️ Created {created_fw} new frameworks.")
         self.stdout.write(f"✔️ Updated/Created {updated_scores} framework scores.")
+        
+
+@login_required
+def export_data(request):
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = 'attachment; filename="framework_scores.csv"'
+
+    writer = csv.writer(response)
+    criteria = Criteria.objects.all()
+    headers = ['Framework'] + [c.name for c in criteria]
+    writer.writerow(headers)
+
+    frameworks = Framework.objects.all()
+    for fw in frameworks:
+        row = [fw.name]
+        for c in criteria:
+            score = FrameworkScore.objects.filter(framework=fw, criteria=c).first()
+            row.append(score.value if score else '')
+        writer.writerow(row)
+
+    return response
+
+@login_required
+def reset_data(request):
+    FrameworkScore.objects.all().delete()
+    Framework.objects.all().delete()
+    messages.success(request, "Semua data framework dan skor berhasil di-reset.")
+    return redirect('framework_list')

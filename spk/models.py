@@ -16,13 +16,12 @@ class Criteria(models.Model):
 
 
 class Framework(models.Model):
-    name = models.CharField(max_length=100, unique=True)
-    description = models.TextField(blank=True)
-    performance = models.FloatField(default=0)
-    scalability = models.IntegerField(default=0)
-    community = models.IntegerField(default=0)
-    learning_time = models.IntegerField(default=0)
-    maintenance = models.IntegerField(default=0)
+    name = models.CharField(max_length=100)
+    performa = models.IntegerField()
+    skalabilitas = models.IntegerField()
+    komunitas = models.IntegerField()
+    kemudahan_belajar = models.IntegerField()
+    pemeliharaan = models.IntegerField()
 
     def __str__(self):
         return self.name
