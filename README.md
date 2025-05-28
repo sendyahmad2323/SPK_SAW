@@ -33,5 +33,9 @@ Aplikasi ini dirancang oleh **Sendy Ahmad**, mahasiswa dari **Universitas Muhamm
 ## 🚀 Tampilan Web
 ![image](https://github.com/user-attachments/assets/b92d83e0-feca-4351-a2a3-28bab3ce6888)
 ![image](https://github.com/user-attachments/assets/2ac09a96-c73c-4afa-9cca-cc85acc9361e)
+![image](https://github.com/user-attachments/assets/04ee7b40-12e1-4b7c-b5b8-d7499de60a86)
+
+![image](https://github.com/user-attachments/assets/c4a3bc11-6b2b-46c8-a05d-f48a9ee81cdf)
+
 
 
