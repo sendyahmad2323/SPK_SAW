@@ -62,15 +62,11 @@
                                             <span class="badge bg-light text-dark">#{{ forloop.counter }}</span>
                                         {% endif %}
                                     </td>
-                                    <td>
-                                        <strong>{{ result.framework }}</strong>
-                                    </td>
-                                    <td>
-                                        <span class="badge bg-primary fs-6">{{ result.score }}</span>
-                                    </td>
+                                    <td><strong>{{ result.framework }}</strong></td>
+                                    <td><span class="badge bg-primary fs-6">{{ result.score }}</span></td>
                                     <td>
                                         {% with percentage=result.score|multiply:100 %}
-                                        <div class="progress">
+                                        <div class="progress" style="height: 20px;">
                                             <div class="progress-bar bg-{% if forloop.first %}success{% elif forloop.counter == 2 %}info{% else %}secondary{% endif %}" 
                                                  role="progressbar" 
                                                  style="width: {{ percentage }}%" 
@@ -98,9 +94,7 @@
         <div class="col-lg-4 mb-4">
             <div class="card h-100">
                 <div class="card-header bg-info text-white">
-                    <h6 class="card-title mb-0">
-                        <i class="fas fa-table"></i> Decision Matrix
-                    </h6>
+                    <h6 class="card-title mb-0"><i class="fas fa-table"></i> Decision Matrix</h6>
                 </div>
                 <div class="card-body">
                     <div class="table-responsive">
@@ -133,9 +127,7 @@
         <div class="col-lg-4 mb-4">
             <div class="card h-100">
                 <div class="card-header bg-warning text-dark">
-                    <h6 class="card-title mb-0">
-                        <i class="fas fa-balance-scale"></i> Normalized Matrix
-                    </h6>
+                    <h6 class="card-title mb-0"><i class="fas fa-balance-scale"></i> Normalized Matrix</h6>
                 </div>
                 <div class="card-body">
                     <div class="table-responsive">
@@ -168,9 +160,7 @@
         <div class="col-lg-4 mb-4">
             <div class="card h-100">
                 <div class="card-header bg-secondary text-white">
-                    <h6 class="card-title mb-0">
-                        <i class="fas fa-weight-hanging"></i> Weighted Matrix
-                    </h6>
+                    <h6 class="card-title mb-0"><i class="fas fa-weight-hanging"></i> Weighted Matrix</h6>
                 </div>
                 <div class="card-body">
                     <div class="table-responsive">
@@ -205,9 +195,7 @@
         <div class="col-12">
             <div class="card">
                 <div class="card-header bg-dark text-white">
-                    <h6 class="card-title mb-0">
-                        <i class="fas fa-weight"></i> Bobot Kriteria
-                    </h6>
+                    <h6 class="card-title mb-0"><i class="fas fa-weight"></i> Bobot Kriteria</h6>
                 </div>
                 <div class="card-body">
                     <div class="row">
@@ -225,30 +213,5 @@
         </div>
     </div>
 
-    <!-- Action Buttons -->
-    <div class="row mb-4">
-        <div class="col-12 text-center">
-            <a href="{% url 'calculate_saw' %}" class="btn btn-primary">
-                <i class="fas fa-redo"></i> Hitung Ulang
-            </a>
-            <a href="{% url 'framework_list' %}" class="btn btn-secondary">
-                <i class="fas fa-arrow-left"></i> Kembali ke Daftar Framework
-            </a>
-            <button onclick="window.print()" class="btn btn-info">
-                <i class="fas fa-print"></i> Print Hasil
-            </button>
-        </div>
-    </div>
 </div>
-
-<style>
-@media print {
-    .btn, .navbar, footer {
-        display: none !important;
-    }
-    .container-fluid {
-        margin-top: 0 !important;
-    }
-}
-</style>
-{% endblock %}
+{% endblock content %}

@@ -2,12 +2,94 @@
 
 {% block content %}
 <div class="container mt-4">
+    <!-- CSV Upload Section -->
+    <div class="row justify-content-center mb-4">
+        <div class="col-md-10">
+            <div class="card border-primary">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-file-csv"></i> Import Framework dari CSV
+                    </h5>
+                </div>
+                <div class="container mt-4">
+    <!-- CSV Upload Section -->
+    <div class="row justify-content-center mb-4">
+        <div class="col-md-10">
+            <div class="card border-primary">
+                <form method="post" enctype="multipart/form-data">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <input type="file" name="csv_upload" id="csv_upload" class="form-control" accept=".csv">
+                    <div class="form-text">Upload file CSV dengan kolom: name, description, score_1, score_2, ...
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-success">Import CSV</button>
+            </form> 
+                    <!-- CSV Format Info -->
+                    <div class="collapse mt-3" id="csvFormatInfo">
+                        <div class="card card-body bg-light">
+                            <h6><i class="fas fa-table"></i> Format CSV yang Diperlukan:</h6>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-bordered">
+                                    <thead class="table-dark">
+                                        <tr>
+                                            <th>nama</th>
+                                            <th>deskripsi</th>
+                                            <th>performa</th>
+                                            <th>skalabilitas</th>
+                                            <th>komunitas</th>
+                                            <th>kemudahan_belajar</th>
+                                            <th>pemeliharaan</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td>Django</td>
+                                            <td>Full-stack framework</td>
+                                            <td>800</td>
+                                            <td>4</td>
+                                            <td>50000</td>
+                                            <td>40</td>
+                                            <td>4</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <small class="text-muted">
+                                <strong>Catatan:</strong> 
+                                <ul class="mb-0">
+                                    <li>Kolom <code>nama</code> dan <code>deskripsi</code> wajib ada</li>
+                                    <li>Kolom kriteria opsional (performa, skalabilitas, dll)</li>
+                                    <li>Skalabilitas: nilai 1-5</li>
+                                    <li>Performa: requests per second</li>
+                                    <li>File maksimal 5MB</li>
+                                </ul>
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Divider -->
+    <div class="row justify-content-center mb-4">
+        <div class="col-md-10">
+            <hr class="my-4">
+            <div class="text-center text-muted">
+                <span class="bg-white px-3">ATAU</span>
+            </div>
+            <hr class="my-4">
+        </div>
+    </div>
+
+    <!-- Manual Input Form -->
     <div class="row justify-content-center">
         <div class="col-md-10">
             <div class="card">
                 <div class="card-header bg-success text-white">
                     <h4 class="card-title mb-0">
-                        <i class="fas fa-plus"></i> Tambah Framework Baru
+                        <i class="fas fa-plus"></i> Tambah Framework Manual
                     </h4>
                 </div>
 

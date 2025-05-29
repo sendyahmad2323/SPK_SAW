@@ -3,6 +3,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth import login, logout
 from django.contrib import messages
 from django.http import HttpResponse
+from io import TextIOWrapper
 import csv
 import io
 from .forms import RegisterForm, CriteriaForm, CSVUploadForm, FrameworkForm
@@ -89,43 +90,97 @@ def delete_criteria(request, criteria_id):
         messages.success(request, f'Kriteria "{criteria_name}" berhasil dihapus.')
     return redirect('framework_list')
 
-# Framework Management
 @login_required
 def add_framework(request):
     criteria_list = Criteria.objects.all()
 
     if request.method == 'POST':
-        form = FrameworkForm(request.POST)
-        if form.is_valid():
-            framework = form.save()
+        # Cek apakah upload CSV atau form biasa
+        if 'csv_upload' in request.FILES:
+            csv_file = request.FILES['csv_upload']
+            # Pastikan file csv (optional)
+            if not csv_file.name.endswith('.csv'):
+                messages.error(request, "File harus format CSV.")
+            else:
+                # Decode dan baca CSV
+                file_data = TextIOWrapper(csv_file.file, encoding='utf-8-sig')
+                reader = csv.DictReader(file_data, delimiter=';')
 
-            for criteria in criteria_list:
-                raw_val = request.POST.get(f'score_{criteria.id}', '').strip()
-                # Hanya parse kalau ada input
-                if raw_val:
+                count = 0
+                for row in reader:
+                    row = {k.strip(): v for k, v in row.items()}
+                    # Asumsi kolom CSV: name, description, score_<criteria_id> ...
+                    name = row.get('name')
+                    description = row.get('description', '')
+
+                    if not name:
+                        continue  # skip jika nama kosong
+                    
+                    if Framework.objects.filter(name=name).exists():
+        # sudah ada, lewati (atau kamu bisa update yang existing)
+                        continue
+
+                    # Simpan framework (bisa ada duplikat)
+                    framework = Framework.objects.create(
+                        name=name,
+                        description=description
+                    )
+                    
+                    form = FrameworkForm(request.POST)
+                    if form.is_valid():
+                        name = form.cleaned_data['name']
+                        if Framework.objects.filter(name=name).exists():
+                            messages.error(request, f'Framework "{name}" sudah ada.')
+                        else:
+                            framework = form.save()
+                    # Simpan nilai untuk tiap criteria
+                    for criteria in criteria_list:
+                        score_val = row.get(criteria.name)
+                        try:
+                            score_val = float(score_val) if score_val else None
+                        except ValueError:
+                            score_val = None
+
+                        if score_val is not None:
+                            FrameworkScore.objects.create(
+                                framework=framework,
+                                criteria=criteria,
+                                value=score_val
+                                )
+                    count += 1
+                messages.success(request, f'{count} framework berhasil diimport dari CSV.')
+                return redirect('framework_list')
+
+        else:
+            # Proses form biasa
+            form = FrameworkForm(request.POST)
+            if form.is_valid():
+                framework = form.save()
+
+                for criteria in criteria_list:
+                    score_val = request.POST.get(f'score_{criteria.id}')
                     try:
-                        score_val = float(raw_val)
+                        score_val = float(score_val) if score_val else None
                     except ValueError:
-                        score_val = 0.0  # atau kamu bisa continue untuk skip invalid
+                        score_val = None
+
                     FrameworkScore.objects.create(
                         framework=framework,
                         criteria=criteria,
                         value=score_val
                     )
-                # kalau raw_val kosong → skip (tidak membuat record)
 
-            messages.success(request, f'Framework "{framework.name}" berhasil ditambahkan.')
-            return redirect('framework_list')
-        else:
-            messages.error(request, "Form tidak valid.")
+                messages.success(request, f'Framework "{framework.name}" berhasil ditambahkan.')
+                return redirect('framework_list')
+            else:
+                messages.error(request, "Form tidak valid.")
     else:
         form = FrameworkForm()
 
     return render(request, 'framework_form.html', {
         'form': form,
         'criteria_list': criteria_list,
-    })
-
+    }) 
 
 
 @login_required
@@ -197,7 +252,6 @@ def framework_list(request):
         'is_ready': len(frameworks) > 0
     })
 
-# SAW Calculation
 @login_required
 def calculate_saw(request):
     criteria_list = list(Criteria.objects.all())
@@ -239,13 +293,15 @@ def calculate_saw(request):
             original_value = decision_matrix[fw.name][criteria.name]
             
             if criteria.attribute == 'benefit':
-                # Untuk benefit: nilai tertinggi terbaik
+                # Benefit: nilai tertinggi terbaik
+                # Rumus benefit: rᵢⱼ = xᵢⱼ / maxⱼ(xᵢⱼ)
                 if max_values[criteria.name] > 0:
                     normalized_value = original_value / max_values[criteria.name]
                 else:
                     normalized_value = 0
             else:
-                # Untuk cost: nilai terendah terbaik
+                # Cost: nilai terendah terbaik
+                # Rumus cost:   rᵢⱼ = minⱼ(xᵢⱼ) / xᵢⱼ
                 if original_value > 0:
                     normalized_value = min_values[criteria.name] / original_value
                 else:
@@ -262,7 +318,7 @@ def calculate_saw(request):
         for criteria in criteria_list:
             normalized_val = normalized_matrix[fw.name][criteria.name]
             weighted_val = normalized_val * criteria.weight
-            weighted_scores[criteria.name] = weighted_val
+            weighted_scores[criteria.name] = round(weighted_val, 4)
             total_score += weighted_val
         
         final_scores.append({
@@ -271,21 +327,40 @@ def calculate_saw(request):
             'weighted_scores': weighted_scores
         })
     
-    # Urutkan berdasarkan score tertinggi
+    # 4. Urutkan berdasarkan score tertinggi
     final_scores.sort(key=lambda x: x['score'], reverse=True)
     best_framework = final_scores[0] if final_scores else None
+
+    # 5. Siapkan data untuk context dan template
+    decision_rows = []
+    normalized_rows = []
+    weighted_rows = []
     
+    for fw in frameworks:
+        decision_rows.append({
+            'framework': fw.name,
+            'values': [decision_matrix[fw.name][c.name] for c in criteria_list]
+        })
+        normalized_rows.append({
+            'framework': fw.name,
+            'values': [round(normalized_matrix[fw.name][c.name], 4) for c in criteria_list]
+        })
+        weighted_rows.append({
+            'framework': fw.name,
+            'values': [round(normalized_matrix[fw.name][c.name] * c.weight, 4) for c in criteria_list]
+        })
+
     context = {
-        'decision_matrix': decision_matrix,
-        'normalized_matrix': normalized_matrix,
+        'decision_matrix': decision_rows,
+        'normalized_matrix': normalized_rows,
+        'weighted_matrix': weighted_rows,
         'final_scores': final_scores,
         'best_framework': best_framework,
         'criteria_list': criteria_list,
         'frameworks': frameworks
     }
-    
-    return render(request, 'result.html', context)
 
+    return render(request, 'result.html', context)
 
 @login_required
 def upload_csv(request):
@@ -341,6 +416,7 @@ def upload_csv(request):
                 elif 'framework' in filename or 'data' in filename:
                     expected = [
                         'Framework',
+                        'Deskripsi',
                         'Performa (req/s)',
                         'Skalabilitas (1-5)',
                         'Komunitas (User)',
@@ -610,3 +686,10 @@ def reset_data(request):
     Framework.objects.all().delete()
     messages.success(request, "Semua data framework dan skor berhasil di-reset.")
     return redirect('framework_list')
+
+def download_csv_template(request):
+    # contoh response CSV
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = 'attachment; filename="template.csv"'
+    response.write("name,description\n")  # contoh header kolom
+    return response

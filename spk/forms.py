@@ -2,6 +2,7 @@ from django import forms
 from django.contrib.auth.forms import UserCreationForm
 from django.contrib.auth.models import User
 from .models import Criteria, Framework, FrameworkScore
+from django.core.exceptions import ValidationError
 
 class RegisterForm(UserCreationForm):
     email = forms.EmailField(
@@ -90,16 +91,47 @@ class CSVUploadForm(forms.Form):
         label='Pilih file CSV',
         widget=forms.FileInput(attrs={
             'class': 'form-control',
-            'accept': '.csv'
+            'accept': '.csv',
         }),
         help_text='Format file: criteria.csv, frameworks.csv, atau scores.csv'
     )
 
     def clean_csv_file(self):
-        file = self.cleaned_data.get('csv_file')
-        if file:
-            if not file.name.endswith('.csv'):
-                raise forms.ValidationError('File harus berformat CSV (.csv)')
-            if file.size > 5 * 1024 * 1024:
-                raise forms.ValidationError('Ukuran file maksimal 5MB')
-        return file
+        csv_file = self.cleaned_data['csv_file']
+        
+        if not csv_file.name.endswith('.csv'):
+            raise ValidationError('File harus berformat CSV (.csv)')
+        
+        if csv_file.size > 5 * 1024 * 1024:  # 5MB limit
+            raise ValidationError('Ukuran file terlalu besar. Maksimal 5MB.')
+        
+        # Validate CSV content
+        try:
+            csv_file.seek(0)
+            content = csv_file.read().decode('utf-8')
+            csv_file.seek(0)  # Reset file pointer
+            
+            # Check if file has content
+            if not content.strip():
+                raise ValidationError('File CSV kosong.')
+            
+            # Basic CSV validation
+            reader = csv.reader(io.StringIO(content))
+            headers = next(reader, None)
+            
+            if not headers:
+                raise ValidationError('File CSV tidak memiliki header.')
+            
+            expected_headers = ['nama', 'deskripsi', 'performa', 'skalabilitas', 'komunitas', 'kemudahan_belajar', 'pemeliharaan']
+            headers_lower = [h.lower().strip() for h in headers]
+            
+            if headers_lower[:2] != ['nama', 'deskripsi']:  # At least nama and deskripsi required
+                raise ValidationError('Header CSV harus dimulai dengan: nama,deskripsi,...')
+                
+        except UnicodeDecodeError:
+            raise ValidationError('File tidak dapat dibaca. Pastikan encoding UTF-8.')
+        except Exception as e:
+            raise ValidationError(f'Error membaca file CSV: {str(e)}')
+        
+
+            return file

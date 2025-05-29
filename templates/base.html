@@ -38,22 +38,22 @@
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav me-auto">
                     <li class="nav-item">
-                        <a class="nav-link" href="{% url 'framework_list' %}">
+                        <a class="nav-link text-white"  href="{% url 'framework_list' %}">
                             <i class="fas fa-list"></i> Frameworks
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{% url 'criteria_list' %}">
+                        <a class="nav-link text-white" href="{% url 'criteria_list' %}">
                             <i class="fas fa-tasks"></i> Criteria
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{% url 'upload_csv' %}">
+                        <a class="nav-link text-white" href="{% url 'upload_csv' %}">
                             <i class="fas fa-upload"></i> Upload CSV
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{% url 'calculate_saw' %}">
+                        <a class="nav-link text-white" href="{% url 'calculate_saw' %}">
                             <i class="fas fa-calculator"></i> Calculate SAW
                         </a>
                     </li>
@@ -61,11 +61,11 @@
                 <ul class="navbar-nav">
                     {% if user.is_authenticated %}
                         <li class="nav-item dropdown">
-                            <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
-                                <i class="fas fa-user"></i> {{ user.username }}
+                            <a class="nav-link text-white dropdown-toggle " href="#" role="button" data-bs-toggle="dropdown">
+                                <i class="fas fa-user text-white"></i> {{ user.username }}
                             </a>
                             <ul class="dropdown-menu">
-                                <li><a class="dropdown-item" href="{% url 'logout' %}">
+                                <li><a class="dropdown-item " href="{% url 'logout' %}">
                                     <i class="fas fa-sign-out-alt"></i> Logout
                                 </a></li>
                             </ul>
@@ -103,7 +103,7 @@
 
     <footer class="bg-light text-center py-3 mt-5">
         <div class="container">
-            <p class="mb-0">&copy; 2024 SAW Framework Selection System. All rights reserved.</p>
+            <p class="mb-0">@ 202 SAW Framework Kelompok 7</p>
         </div>
     </footer>
 

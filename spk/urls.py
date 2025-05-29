@@ -30,4 +30,5 @@ urlpatterns = [
     
     # CSV Upload
     path('upload/', views.upload_csv, name='upload_csv'),
+    path('download-template/', views.download_csv_template, name='download_csv_template'),
 ]
