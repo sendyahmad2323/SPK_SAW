@@ -256,111 +256,105 @@ def framework_list(request):
 def calculate_saw(request):
     criteria_list = list(Criteria.objects.all())
     frameworks = list(Framework.objects.all())
-    
+
+    # Validasi
     if not criteria_list or not frameworks:
         messages.error(request, 'Data kriteria atau framework masih kosong.')
         return redirect('framework_list')
-    
-    # Validasi total bobot
     total_weight = sum(c.weight for c in criteria_list)
     if abs(total_weight - 1.0) > 0.001:
-        messages.error(request, f'Total bobot kriteria harus 1.0 (saat ini: {total_weight:.3f})')
+        messages.error(request, f'Total bobot kriteria harus 1.0 (saat ini: {total_weight:.3f}).')
         return redirect('framework_list')
-    
-    # 1. Buat decision matrix
-    decision_matrix = {}
-    for fw in frameworks:
-        decision_matrix[fw.name] = {}
-        for criteria in criteria_list:
-            score = FrameworkScore.objects.filter(framework=fw, criteria=criteria).first()
-            decision_matrix[fw.name][criteria.name] = score.value if score else 0
-    
-    # 2. Normalisasi
-    normalized_matrix = {}
-    max_values = {}
-    min_values = {}
-    
-    # Cari nilai max dan min untuk setiap kriteria
-    for criteria in criteria_list:
-        values = [decision_matrix[fw.name][criteria.name] for fw in frameworks]
-        max_values[criteria.name] = max(values) if values else 1
-        min_values[criteria.name] = min(values) if values else 0
-    
-    # Normalisasi berdasarkan tipe atribut
-    for fw in frameworks:
-        normalized_matrix[fw.name] = {}
-        for criteria in criteria_list:
-            original_value = decision_matrix[fw.name][criteria.name]
-            
-            if criteria.attribute == 'benefit':
-                # Benefit: nilai tertinggi terbaik
-                # Rumus benefit: rᵢⱼ = xᵢⱼ / maxⱼ(xᵢⱼ)
-                if max_values[criteria.name] > 0:
-                    normalized_value = original_value / max_values[criteria.name]
-                else:
-                    normalized_value = 0
-            else:
-                # Cost: nilai terendah terbaik
-                # Rumus cost:   rᵢⱼ = minⱼ(xᵢⱼ) / xᵢⱼ
-                if original_value > 0:
-                    normalized_value = min_values[criteria.name] / original_value
-                else:
-                    normalized_value = 1  # Jika nilai 0, berikan nilai terbaik
-            
-            normalized_matrix[fw.name][criteria.name] = normalized_value
-    
-    # 3. Hitung nilai akhir (weighted sum)
-    final_scores = []
-    for fw in frameworks:
-        total_score = 0
-        weighted_scores = {}
-        
-        for criteria in criteria_list:
-            normalized_val = normalized_matrix[fw.name][criteria.name]
-            weighted_val = normalized_val * criteria.weight
-            weighted_scores[criteria.name] = round(weighted_val, 4)
-            total_score += weighted_val
-        
-        final_scores.append({
-            'framework': fw.name,
-            'score': round(total_score, 4),
-            'weighted_scores': weighted_scores
-        })
-    
-    # 4. Urutkan berdasarkan score tertinggi
-    final_scores.sort(key=lambda x: x['score'], reverse=True)
-    best_framework = final_scores[0] if final_scores else None
 
-    # 5. Siapkan data untuk context dan template
-    decision_rows = []
-    normalized_rows = []
-    weighted_rows = []
-    
+    # 1. Build raw decision values dan cari max/min per kriteria
+    raw_values = {}  # { fw.id: { c.name: value, ... }, ... }
+    max_vals = {c.name: 0 for c in criteria_list}
+    min_vals = {c.name: float('inf') for c in criteria_list}
+
     for fw in frameworks:
+        fw_vals = {}
+        for c in criteria_list:
+            sc = FrameworkScore.objects.filter(framework=fw, criteria=c).first()
+            val = sc.value if sc else 0
+            fw_vals[c.name] = val
+            # update max/min
+            if val > max_vals[c.name]:
+                max_vals[c.name] = val
+            if val < min_vals[c.name]:
+                min_vals[c.name] = val
+        raw_values[fw.id] = fw_vals
+
+    # kalau ada kriteria yang semua val=0, set min=0, max=1 agar tidak div0
+    for c in criteria_list:
+        if max_vals[c.name] == 0:
+            max_vals[c.name] = 1
+        if min_vals[c.name] == float('inf'):
+            min_vals[c.name] = 0
+
+    # 2. Hitung semua matrix dan final_scores
+    decision_rows, normalized_rows, weighted_rows = [], [], []
+    final_scores = []
+
+    for fw in frameworks:
+        rid = fw.id
+        # decision row
         decision_rows.append({
             'framework': fw.name,
-            'values': [decision_matrix[fw.name][c.name] for c in criteria_list]
+            'values': [raw_values[rid][c.name] for c in criteria_list]
         })
+
+        # normalisasi & weighted
+        norm_vals, weight_vals = [], []
+        total_score = 0.0
+        for c in criteria_list:
+            x = raw_values[rid][c.name]
+            if c.attribute == 'benefit':
+                r = x / max_vals[c.name]
+            else:  # cost
+                r = min_vals[c.name] / x if x > 0 else 1
+            norm_vals.append(r)
+            wv = r * c.weight
+            weight_vals.append(wv)
+            total_score += wv
+
         normalized_rows.append({
             'framework': fw.name,
-            'values': [round(normalized_matrix[fw.name][c.name], 4) for c in criteria_list]
+            'values': norm_vals
         })
         weighted_rows.append({
             'framework': fw.name,
-            'values': [round(normalized_matrix[fw.name][c.name] * c.weight, 4) for c in criteria_list]
+            'values': weight_vals
         })
 
+        # final_scores tanpa pembulatan, tapi simpan untuk display
+        final_scores.append({
+            'framework': fw.name,
+            'score': total_score,
+            'score_display': round(total_score, 6),
+            'percentage': round(total_score * 100, 2),
+        })
+
+    # 3. Urut dan tambahkan rank/medal
+    final_scores.sort(key=lambda x: x['score'], reverse=True)
+    for idx, fs in enumerate(final_scores, start=1):
+        fs['rank'] = idx
+        if idx == 1:        fs['medal'] = '🥇'
+        elif idx == 2:      fs['medal'] = '🥈'
+        elif idx == 3:      fs['medal'] = '🥉'
+        else:               fs['medal'] = None
+
+    best_framework = final_scores[0] if final_scores else None
+
     context = {
+        'criteria_list': criteria_list,
         'decision_matrix': decision_rows,
         'normalized_matrix': normalized_rows,
         'weighted_matrix': weighted_rows,
         'final_scores': final_scores,
         'best_framework': best_framework,
-        'criteria_list': criteria_list,
-        'frameworks': frameworks
     }
-
     return render(request, 'result.html', context)
+
 
 @login_required
 def upload_csv(request):

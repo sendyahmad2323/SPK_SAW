@@ -18,7 +18,8 @@
                         🏆 Framework Terbaik: <strong>{{ best_framework.framework }}</strong>
                     </h3>
                     <h4 class="text-primary">
-                        Skor Akhir: <span class="badge bg-primary fs-5">{{ best_framework.score }}</span>
+                        Skor Akhir: <span class="badge bg-primary fs-5">{{ best_framework.score_display }}</span>
+                        <small class="text-white-50">({{ best_framework.percentage }}%)</small>
                     </h4>
                     {% else %}
                     <h3 class="text-warning">Tidak ada hasil untuk ditampilkan</h3>
@@ -214,4 +215,4 @@
     </div>
 
 </div>
-{% endblock content %}
+{% endblock content %} 
