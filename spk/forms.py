@@ -3,6 +3,8 @@ from django.contrib.auth.forms import UserCreationForm
 from django.contrib.auth.models import User
 from .models import Criteria, Framework, FrameworkScore
 from django.core.exceptions import ValidationError
+import csv
+import io
 
 class RegisterForm(UserCreationForm):
     email = forms.EmailField(
@@ -132,6 +134,4 @@ class CSVUploadForm(forms.Form):
             raise ValidationError('File tidak dapat dibaca. Pastikan encoding UTF-8.')
         except Exception as e:
             raise ValidationError(f'Error membaca file CSV: {str(e)}')
-        
-
-            return file
+        return csv_file

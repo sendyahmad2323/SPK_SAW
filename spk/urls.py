@@ -6,6 +6,7 @@ urlpatterns = [
     path('', views.dashboard, name='dashboard'),
     
     # Authentication
+    path('login/', views.login, name='login'),
     path('register/', views.register, name='register'),
     path('logout/', views.logout_view, name='logout'),
     
@@ -21,7 +22,7 @@ urlpatterns = [
     path('edit-scores/<int:framework_id>/', views.edit_framework_scores, name='edit_framework_scores'),
     path('frameworks/<int:framework_id>/delete/', views.delete_framework, name='delete_framework'),
     
-    #update
+    #Quick Aksi
     path('export/', views.export_data, name='export_data'),
     path('reset/', views.reset_data, name='reset_data'),
     

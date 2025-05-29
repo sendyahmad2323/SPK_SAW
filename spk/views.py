@@ -1,6 +1,6 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth import login, logout
+from django.contrib.auth import authenticate, login as auth_login, logout
 from django.contrib import messages
 from django.http import HttpResponse
 from io import TextIOWrapper
@@ -10,16 +10,33 @@ from .forms import RegisterForm, CriteriaForm, CSVUploadForm, FrameworkForm
 from .models import Criteria, Framework, FrameworkScore, UserProfile
 from django.core.management.base import BaseCommand
 
-# Registration and Authentication
+
+def login(request):
+    if request.user.is_authenticated:
+        # Kalau user sudah login, langsung redirect ke dashboard (atau halaman lain)
+        return redirect('dashboard')
+    if request.method == 'POST':
+        username = request.POST.get('username')
+        password = request.POST.get('password')
+        user = authenticate(request, username=username, password=password)
+        if user is not None:
+            auth_login(request, user)
+            messages.success(request, 'Login berhasil!')
+            return redirect('dashboard')  # sesuaikan dengan URL dashboard kamu
+        else:
+            messages.error(request, 'Username atau password salah.')
+    return render(request, 'registration/login.html')
+
+
+
 def register(request):
     if request.method == 'POST':
         form = RegisterForm(request.POST)
         if form.is_valid():
             user = form.save()
             UserProfile.objects.get_or_create(user=user)
-            login(request, user)
-            messages.success(request, 'Registrasi berhasil! Selamat datang.')
-            return redirect('dashboard')
+            messages.success(request, 'Registrasi berhasil! Silakan login.')
+            return redirect('login')  # arahkan ke halaman login
         else:
             messages.error(request, 'Terjadi kesalahan pada form registrasi.')
     else:
@@ -115,10 +132,7 @@ def add_framework(request):
 
                     if not name:
                         continue  # skip jika nama kosong
-                    
-                    if Framework.objects.filter(name=name).exists():
-        # sudah ada, lewati (atau kamu bisa update yang existing)
-                        continue
+                
 
                     # Simpan framework (bisa ada duplikat)
                     framework = Framework.objects.create(

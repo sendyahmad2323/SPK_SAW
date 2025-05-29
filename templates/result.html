@@ -213,6 +213,31 @@
             </div>
         </div>
     </div>
+    <!-- Action Buttons -->
+    <div class="row mb-4">
+        <div class="col-12 text-center">
+            <a href="{% url 'calculate_saw' %}" class="btn btn-primary">
+                <i class="fas fa-redo"></i> Hitung Ulang
+            </a>
+            <a href="{% url 'framework_list' %}" class="btn btn-secondary">
+                <i class="fas fa-arrow-left"></i> Kembali ke Daftar Framework
+            </a>
+            <button onclick="window.print()" class="btn btn-info">
+                <i class="fas fa-print"></i> Print Hasil
+            </button>
+        </div>
+    </div>
+</div>
 
+<style>
+@media print {
+    .btn, .navbar, footer {
+        display: none !important;
+    }
+    .container-fluid {
+        margin-top: 0 !important;
+    }
+}
+</style>
 </div>
 {% endblock content %} 
