@@ -166,35 +166,32 @@ def add_framework(request):
                 return redirect('framework_list')
 
         else:
-            # Proses form biasa
             form = FrameworkForm(request.POST)
             if form.is_valid():
-                framework = form.save()
-
-                for criteria in criteria_list:
-                    score_val = request.POST.get(f'score_{criteria.id}')
-                    try:
-                        score_val = float(score_val) if score_val else None
-                    except ValueError:
-                        score_val = None
-
-                    FrameworkScore.objects.create(
-                        framework=framework,
-                        criteria=criteria,
-                        value=score_val
-                    )
-
-                messages.success(request, f'Framework "{framework.name}" berhasil ditambahkan.')
+                fw = form.save()
+                for crit in criteria_list:
+                    nilai = request.POST.get(f'score_{crit.id}')
+                    if nilai:
+                        try:
+                            value = float(nilai)
+                            FrameworkScore.objects.update_or_create(
+                                framework=fw,
+                                criteria=crit,
+                                defaults={'value': value}
+                                )
+                        except ValueError:
+                            continue
+                messages.success(request, f'Framework "{fw.name}" berhasil ditambahkan.')
                 return redirect('framework_list')
             else:
                 messages.error(request, "Form tidak valid.")
     else:
         form = FrameworkForm()
-
+        
     return render(request, 'framework_form.html', {
-        'form': form,
-        'criteria_list': criteria_list,
-    }) 
+                  'form': form,
+                  'criteria_list': criteria_list,
+    })
 
 
 @login_required
@@ -268,79 +265,68 @@ def framework_list(request):
 
 @login_required
 def calculate_saw(request):
+    # Ambil semua kriteria dan framework
     criteria_list = list(Criteria.objects.all())
-    frameworks = list(Framework.objects.all())
+    frameworks   = list(Framework.objects.all())
 
-    # Validasi
+    # Validasi data
     if not criteria_list or not frameworks:
         messages.error(request, 'Data kriteria atau framework masih kosong.')
         return redirect('framework_list')
+
+    # Total bobot harus 1.0
     total_weight = sum(c.weight for c in criteria_list)
     if abs(total_weight - 1.0) > 0.001:
         messages.error(request, f'Total bobot kriteria harus 1.0 (saat ini: {total_weight:.3f}).')
         return redirect('framework_list')
 
-    # 1. Build raw decision values dan cari max/min per kriteria
-    raw_values = {}  # { fw.id: { c.name: value, ... }, ... }
-    max_vals = {c.name: 0 for c in criteria_list}
-    min_vals = {c.name: float('inf') for c in criteria_list}
+    # 1. Bangun matriks X dan cari max/min per kriteria
+    raw_values = {}  # {fw.id: {c.id: value, ...}, ...}
+    max_vals   = {}
+    min_vals   = {}
 
-    for fw in frameworks:
-        fw_vals = {}
-        for c in criteria_list:
-            sc = FrameworkScore.objects.filter(framework=fw, criteria=c).first()
-            val = sc.value if sc else 0
-            fw_vals[c.name] = val
-            # update max/min
-            if val > max_vals[c.name]:
-                max_vals[c.name] = val
-            if val < min_vals[c.name]:
-                min_vals[c.name] = val
-        raw_values[fw.id] = fw_vals
-
-    # kalau ada kriteria yang semua val=0, set min=0, max=1 agar tidak div0
+    # Inisialisasi max/min
     for c in criteria_list:
-        if max_vals[c.name] == 0:
-            max_vals[c.name] = 1
-        if min_vals[c.name] == float('inf'):
-            min_vals[c.name] = 0
+        max_vals[c.id] = 0
+        min_vals[c.id] = float('inf')
 
-    # 2. Hitung semua matrix dan final_scores
-    decision_rows, normalized_rows, weighted_rows = [], [], []
-    final_scores = []
+    # Isi raw_values dan update max/min
+    for fw in frameworks:
+        vals = {}
+        for c in criteria_list:
+            fs = FrameworkScore.objects.filter(framework=fw, criteria=c).first()
+            x = fs.value if fs and fs.value is not None else 0.0
+            vals[c.id] = x
+
+            if x > max_vals[c.id]:
+                max_vals[c.id] = x
+            if x < min_vals[c.id]:
+                min_vals[c.id] = x
+        raw_values[fw.id] = vals
+
+    # Jika semua nilai kriteria nol, atur min=0, max=1 agar tidak div/0
+    for c in criteria_list:
+        if max_vals[c.id] == 0:
+            max_vals[c.id] = 1
+        if min_vals[c.id] == float('inf'):
+            min_vals[c.id] = 0
+
+    # 2. Normalisasi R dan hitung skor V
+    final_scores = []  # list of dict {framework, score, score_display, percentage, rank, medal}
 
     for fw in frameworks:
-        rid = fw.id
-        # decision row
-        decision_rows.append({
-            'framework': fw.name,
-            'values': [raw_values[rid][c.name] for c in criteria_list]
-        })
-
-        # normalisasi & weighted
-        norm_vals, weight_vals = [], []
         total_score = 0.0
         for c in criteria_list:
-            x = raw_values[rid][c.name]
+            x = raw_values[fw.id][c.id]
             if c.attribute == 'benefit':
-                r = x / max_vals[c.name]
-            else:  # cost
-                r = min_vals[c.name] / x if x > 0 else 1
-            norm_vals.append(r)
-            wv = r * c.weight
-            weight_vals.append(wv)
-            total_score += wv
+                # Benefit: x / max
+                r = x / max_vals[c.id] if max_vals[c.id] > 0 else 0
+            else:
+                # Cost: min / x
+                r = (min_vals[c.id] / x) if x > 0 else 0
 
-        normalized_rows.append({
-            'framework': fw.name,
-            'values': norm_vals
-        })
-        weighted_rows.append({
-            'framework': fw.name,
-            'values': weight_vals
-        })
+            total_score += r * c.weight
 
-        # final_scores tanpa pembulatan, tapi simpan untuk display
         final_scores.append({
             'framework': fw.name,
             'score': total_score,
@@ -348,26 +334,27 @@ def calculate_saw(request):
             'percentage': round(total_score * 100, 2),
         })
 
-    # 3. Urut dan tambahkan rank/medal
-    final_scores.sort(key=lambda x: x['score'], reverse=True)
-    for idx, fs in enumerate(final_scores, start=1):
-        fs['rank'] = idx
-        if idx == 1:        fs['medal'] = '🥇'
-        elif idx == 2:      fs['medal'] = '🥈'
-        elif idx == 3:      fs['medal'] = '🥉'
-        else:               fs['medal'] = None
+    # 3. Urutkan berdasarkan score dan beri peringkat/medali
+    final_scores.sort(key=lambda d: d['score'], reverse=True)
+    for idx, item in enumerate(final_scores, start=1):
+        item['rank'] = idx
+        if idx == 1:
+            item['medal'] = '🥇'
+        elif idx == 2:
+            item['medal'] = '🥈'
+        elif idx == 3:
+            item['medal'] = '🥉'
+        else:
+            item['medal'] = ''
 
+    # Framework terbaik
     best_framework = final_scores[0] if final_scores else None
 
-    context = {
+    return render(request, 'result.html', {
         'criteria_list': criteria_list,
-        'decision_matrix': decision_rows,
-        'normalized_matrix': normalized_rows,
-        'weighted_matrix': weighted_rows,
         'final_scores': final_scores,
         'best_framework': best_framework,
-    }
-    return render(request, 'result.html', context)
+    })
 
 
 @login_required
@@ -657,11 +644,12 @@ class Command(BaseCommand):
                         self.stderr.write(f"⚠️ Criteria '{crit_name}' not found, skipping.")
                         continue
 
-                    fs, _ = FrameworkScore.objects.update_or_create(
+                    FrameworkScore.objects.update_or_create(
                         framework=fw,
                         criteria=crit,
                         defaults={'value': value}
                     )
+
                     updated_scores += 1
 
         self.stdout.write(f"✔️ Created {created_fw} new frameworks.")

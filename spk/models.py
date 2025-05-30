@@ -25,7 +25,7 @@ class Framework(models.Model):
 
 
 class FrameworkScore(models.Model):
-    framework = models.ForeignKey(Framework, on_delete=models.CASCADE)
+    framework = models.ForeignKey(Framework, on_delete=models.CASCADE, related_name="scores")
     criteria = models.ForeignKey(Criteria, on_delete=models.CASCADE)
     value = models.FloatField(null=True, blank=True)
 
